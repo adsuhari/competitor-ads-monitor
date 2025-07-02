@@ -1,4 +1,4 @@
-name: Daily Competitor Ads Monitor
+name: Enhanced Competitor Ads Monitor
 on:
   schedule:
     - cron: '0 6 * * *'  # Daily at 6 AM UTC
@@ -20,7 +20,7 @@ jobs:
         run: |
           pip install requests gspread oauth2client
           
-      - name: Run competitor monitor
+      - name: Run enhanced competitor monitor
         env:
           GOOGLE_SHEETS_CREDS: ${{ secrets.GOOGLE_SHEETS_CREDS }}
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
