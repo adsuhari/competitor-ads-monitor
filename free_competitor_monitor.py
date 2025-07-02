@@ -7,9 +7,9 @@ class FreeCompetitorMonitor:
     def __init__(self):
         # CHANGE THESE TO YOUR COMPETITORS
         self.competitors = [
-            "Nike",
-            "Adidas", 
-            "Puma"
+            "The Neon Company",
+            "Neonsfeer", 
+            "NEONTRIP.de"
         ]
         
         # CHANGE THIS TO YOUR GOOGLE SHEET NAME
