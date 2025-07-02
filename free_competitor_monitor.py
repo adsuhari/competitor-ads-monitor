@@ -1,9 +1,9 @@
 import requests
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 import time
-import base64
+import re
 
 class EnhancedCompetitorMonitor:
     def __init__(self):
@@ -17,103 +17,121 @@ class EnhancedCompetitorMonitor:
         self.sheet_name = "Competitor Ads Data"
         
     def fetch_real_ads_data(self, competitor_name):
-        """Fetch actual ads data from Meta Ad Library API"""
+        """Fetch actual ads data from Meta Ad Library API (public endpoint)"""
         try:
-            # Meta Ad Library API (free, no token required for basic data)
+            # Using the public Meta Ad Library endpoint that doesn't require authentication
             url = "https://graph.facebook.com/v18.0/ads_archive"
             
             params = {
                 'search_terms': competitor_name,
-                'ad_reached_countries': 'US',
+                'ad_reached_countries': 'US,GB,DE,NL',  # Multiple countries for better results
                 'ad_active_status': 'ALL',
-                'search_page_ids': '',
-                'ad_type': 'ALL',
-                'media_type': 'ALL',
-                'limit': 20,  # Get 20 recent ads
-                'fields': 'id,ad_creation_time,ad_creative_bodies,ad_creative_link_captions,ad_creative_link_descriptions,ad_creative_link_titles,ad_snapshot_url,funding_entity,page_name,ad_delivery_start_time,ad_delivery_stop_time,impressions,spend,reach'
+                'limit': 50,  # Increased limit
+                # Simplified fields that work without token
+                'fields': 'id,ad_snapshot_url,page_name,funding_entity,ad_creation_time'
             }
             
-            response = requests.get(url, params=params)
+            response = requests.get(url, params=params, timeout=30)
+            print(f"API Response Status: {response.status_code}")
             
             if response.status_code == 200:
                 data = response.json()
-                return self.process_ad_data(data.get('data', []), competitor_name)
+                print(f"Raw API response: {json.dumps(data, indent=2)[:500]}...")
+                
+                if 'data' in data and data['data']:
+                    return self.process_ad_data(data['data'], competitor_name)
+                else:
+                    print(f"No ads found in API response for {competitor_name}")
+                    return []
             else:
-                print(f"❌ Error fetching ads for {competitor_name}: {response.status_code}")
+                print(f"❌ API Error {response.status_code}: {response.text}")
                 return []
                 
         except Exception as e:
             print(f"❌ Error fetching ads for {competitor_name}: {e}")
             return []
     
+    def scrape_ad_details(self, snapshot_url):
+        """Scrape additional details from the snapshot URL"""
+        try:
+            if not snapshot_url:
+                return {}
+                
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            response = requests.get(snapshot_url, headers=headers, timeout=15)
+            if response.status_code == 200:
+                html_content = response.text
+                
+                # Extract ad text using regex patterns
+                ad_text = ""
+                
+                # Look for common ad text patterns
+                text_patterns = [
+                    r'"body":\s*"([^"]+)"',
+                    r'"primary_text":\s*"([^"]+)"',
+                    r'data-testid="ad-text"[^>]*>([^<]+)',
+                    r'<div[^>]*class="[^"]*ad[^"]*text[^"]*"[^>]*>([^<]+)'
+                ]
+                
+                for pattern in text_patterns:
+                    matches = re.findall(pattern, html_content, re.IGNORECASE)
+                    if matches:
+                        ad_text = matches[0].strip()
+                        break
+                
+                return {
+                    'ad_text': ad_text[:500] if ad_text else 'Text extraction unavailable',
+                    'extracted_from_snapshot': True
+                }
+                
+        except Exception as e:
+            print(f"Error scraping snapshot: {e}")
+            
+        return {'ad_text': 'Unable to extract text', 'extracted_from_snapshot': False}
+    
     def process_ad_data(self, raw_ads, competitor_name):
         """Process and structure the ad data"""
         processed_ads = []
         
-        for ad in raw_ads:
+        print(f"Processing {len(raw_ads)} ads for {competitor_name}")
+        
+        for i, ad in enumerate(raw_ads):
             try:
-                # Extract ad creative text
-                ad_bodies = ad.get('ad_creative_bodies', [])
-                ad_body = ad_bodies[0].get('text', '') if ad_bodies else ''
+                print(f"Processing ad {i+1}: {ad}")
                 
-                ad_titles = ad.get('ad_creative_link_titles', [])
-                ad_title = ad_titles[0].get('text', '') if ad_titles else ''
+                # Get basic ad info
+                ad_id = ad.get('id', '')
+                page_name = ad.get('page_name', '')
+                snapshot_url = ad.get('ad_snapshot_url', '')
+                creation_time = ad.get('ad_creation_time', '')
+                funding_entity = ad.get('funding_entity', '')
                 
-                ad_descriptions = ad.get('ad_creative_link_descriptions', [])
-                ad_description = ad_descriptions[0].get('text', '') if ad_descriptions else ''
-                
-                ad_captions = ad.get('ad_creative_link_captions', [])
-                ad_caption = ad_captions[0].get('text', '') if ad_captions else ''
-                
-                # Extract metrics
-                impressions = ad.get('impressions', {})
-                spend = ad.get('spend', {})
-                reach = ad.get('reach', {})
-                
-                # Format impressions range
-                impressions_text = ""
-                if impressions:
-                    lower = impressions.get('lower_bound', 'N/A')
-                    upper = impressions.get('upper_bound', 'N/A')
-                    impressions_text = f"{lower} - {upper}"
-                
-                # Format spend range
-                spend_text = ""
-                if spend:
-                    lower = spend.get('lower_bound', 'N/A')
-                    upper = spend.get('upper_bound', 'N/A')
-                    spend_text = f"${lower} - ${upper}"
-                
-                # Format reach range
-                reach_text = ""
-                if reach:
-                    lower = reach.get('lower_bound', 'N/A')
-                    upper = reach.get('upper_bound', 'N/A')
-                    reach_text = f"{lower} - {upper}"
+                # Try to get additional details from snapshot
+                snapshot_details = self.scrape_ad_details(snapshot_url)
                 
                 processed_ad = {
                     'date_found': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     'competitor': competitor_name,
-                    'page_name': ad.get('page_name', ''),
-                    'ad_id': ad.get('id', ''),
-                    'ad_title': ad_title,
-                    'ad_body': ad_body,
-                    'ad_description': ad_description,
-                    'ad_caption': ad_caption,
-                    'creation_time': ad.get('ad_creation_time', ''),
-                    'start_time': ad.get('ad_delivery_start_time', ''),
-                    'stop_time': ad.get('ad_delivery_stop_time', ''),
-                    'impressions': impressions_text,
-                    'spend': spend_text,
-                    'reach': reach_text,
-                    'snapshot_url': ad.get('ad_snapshot_url', ''),
-                    'funding_entity': ad.get('funding_entity', '')
+                    'page_name': page_name,
+                    'ad_id': ad_id,
+                    'ad_text': snapshot_details.get('ad_text', 'Text not available'),
+                    'creation_time': creation_time,
+                    'funding_entity': funding_entity,
+                    'snapshot_url': snapshot_url,
+                    'data_source': 'Meta Ad Library API + Snapshot Scraping'
                 }
                 
                 processed_ads.append(processed_ad)
+                print(f"✅ Processed ad: {page_name} - {ad_id}")
+                
+                # Small delay between snapshot requests
+                time.sleep(1)
                 
             except Exception as e:
-                print(f"❌ Error processing ad: {e}")
+                print(f"❌ Error processing ad {i+1}: {e}")
                 continue
         
         return processed_ads
@@ -123,6 +141,8 @@ class EnhancedCompetitorMonitor:
         try:
             import gspread
             from oauth2client.service_account import ServiceAccountCredentials
+            
+            print(f"Attempting to save {len(all_ads_data)} ads to Google Sheets")
             
             creds_json = json.loads(os.getenv('GOOGLE_SHEETS_CREDS'))
             scope = ['https://spreadsheets.google.com/feeds',
@@ -135,10 +155,8 @@ class EnhancedCompetitorMonitor:
             
             # Enhanced headers
             headers = [
-                'Date Found', 'Competitor', 'Page Name', 'Ad ID', 'Ad Title', 
-                'Ad Body', 'Ad Description', 'Ad Caption', 'Creation Time', 
-                'Start Time', 'Stop Time', 'Impressions', 'Spend', 'Reach', 
-                'Snapshot URL', 'Funding Entity'
+                'Date Found', 'Competitor', 'Page Name', 'Ad ID', 'Ad Text', 
+                'Creation Time', 'Funding Entity', 'Snapshot URL', 'Data Source'
             ]
             
             # Clear and add headers
@@ -152,32 +170,23 @@ class EnhancedCompetitorMonitor:
                     ad.get('competitor', ''),
                     ad.get('page_name', ''),
                     ad.get('ad_id', ''),
-                    ad.get('ad_title', ''),
-                    ad.get('ad_body', ''),
-                    ad.get('ad_description', ''),
-                    ad.get('ad_caption', ''),
+                    ad.get('ad_text', ''),
                     ad.get('creation_time', ''),
-                    ad.get('start_time', ''),
-                    ad.get('stop_time', ''),
-                    ad.get('impressions', ''),
-                    ad.get('spend', ''),
-                    ad.get('reach', ''),
+                    ad.get('funding_entity', ''),
                     ad.get('snapshot_url', ''),
-                    ad.get('funding_entity', '')
+                    ad.get('data_source', '')
                 ]
                 sheet.append_row(row)
             
-            print(f"✅ Saved {len(all_ads_data)} ads with full data to Google Sheets")
+            print(f"✅ Saved {len(all_ads_data)} ads with data to Google Sheets")
             
         except Exception as e:
             print(f"❌ Error saving to sheets: {e}")
-            # Print data for debugging
-            print("📊 Collected ads data:")
-            for ad in all_ads_data[:3]:  # Show first 3 for debugging
-                print(f"   🎯 {ad.get('competitor')} - {ad.get('ad_title', 'No title')}")
-                print(f"      💰 Spend: {ad.get('spend', 'N/A')}")
-                print(f"      👀 Impressions: {ad.get('impressions', 'N/A')}")
-                print(f"      📝 Body: {ad.get('ad_body', 'No body')[:100]}...")
+            print("📊 Collected ads data (fallback display):")
+            for ad in all_ads_data:
+                print(f"   🎯 {ad.get('competitor')} - {ad.get('page_name', 'Unknown Page')}")
+                print(f"      📝 Text: {ad.get('ad_text', 'No text')[:100]}...")
+                print(f"      🔗 URL: {ad.get('snapshot_url', 'No URL')}")
                 print()
     
     def send_enhanced_notification(self, summary):
@@ -205,8 +214,8 @@ class EnhancedCompetitorMonitor:
                         "inline": True
                     },
                     {
-                        "name": "Active Campaigns",
-                        "value": str(summary.get('active_campaigns', 0)),
+                        "name": "Pages Found",
+                        "value": str(summary.get('unique_pages', 0)),
                         "inline": True
                     }
                 ]
@@ -225,7 +234,7 @@ class EnhancedCompetitorMonitor:
         all_ads_data = []
         
         for competitor in self.competitors:
-            print(f"📊 Fetching real ads for {competitor}...")
+            print(f"\n📊 Fetching real ads for {competitor}...")
             
             # Get actual ad data from Meta Ad Library
             competitor_ads = self.fetch_real_ads_data(competitor)
@@ -233,34 +242,42 @@ class EnhancedCompetitorMonitor:
             
             print(f"   ✅ Found {len(competitor_ads)} ads for {competitor}")
             
-            # Small delay to be respectful to the API
-            time.sleep(2)
+            # Delay between competitors
+            time.sleep(3)
         
-        # Save enhanced data
-        self.save_to_google_sheets(all_ads_data)
+        print(f"\n📊 Total ads collected: {len(all_ads_data)}")
         
-        # Generate summary
-        summary = {
-            'total_ads': len(all_ads_data),
-            'competitors_count': len(self.competitors),
-            'active_campaigns': len(set(ad.get('page_name', '') for ad in all_ads_data))
-        }
-        
-        # Send enhanced notification
-        self.send_enhanced_notification(summary)
-        
-        print(f"✅ Enhanced monitoring complete!")
-        print(f"📊 Total ads collected: {len(all_ads_data)}")
-        print(f"📝 Check your Google Sheet: {self.sheet_name}")
-        
-        # Print sample data
         if all_ads_data:
+            # Save enhanced data
+            self.save_to_google_sheets(all_ads_data)
+            
+            # Generate summary
+            summary = {
+                'total_ads': len(all_ads_data),
+                'competitors_count': len(self.competitors),
+                'unique_pages': len(set(ad.get('page_name', '') for ad in all_ads_data if ad.get('page_name')))
+            }
+            
+            # Send enhanced notification
+            self.send_enhanced_notification(summary)
+            
+            print(f"✅ Enhanced monitoring complete!")
+            print(f"📝 Check your Google Sheet: {self.sheet_name}")
+            
+            # Print sample data
             print("\n🎯 Sample ad data:")
-            sample_ad = all_ads_data[0]
-            print(f"   Competitor: {sample_ad.get('competitor')}")
-            print(f"   Title: {sample_ad.get('ad_title', 'No title')}")
-            print(f"   Spend: {sample_ad.get('spend', 'N/A')}")
-            print(f"   Impressions: {sample_ad.get('impressions', 'N/A')}")
+            for ad in all_ads_data[:2]:
+                print(f"   Competitor: {ad.get('competitor')}")
+                print(f"   Page: {ad.get('page_name', 'Unknown')}")
+                print(f"   Text: {ad.get('ad_text', 'No text')[:100]}...")
+                print(f"   URL: {ad.get('snapshot_url', 'No URL')}")
+                print()
+        else:
+            print("❌ No ads found for any competitors")
+            print("This could be because:")
+            print("   - Competitors don't have active ads in the specified countries")
+            print("   - Company names don't match exactly in Meta Ad Library")
+            print("   - API rate limiting or temporary issues")
 
 if __name__ == "__main__":
     monitor = EnhancedCompetitorMonitor()
