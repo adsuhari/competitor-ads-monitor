@@ -7,11 +7,11 @@ import base64
 
 class EnhancedCompetitorMonitor:
     def __init__(self):
-        # CHANGE THESE TO YOUR COMPETITORS
+        # YOUR COMPETITORS
         self.competitors = [
-            "Nike",
-            "Adidas", 
-            "Puma"
+            "The Neon Company",
+            "NEONTRIP.de",
+            "Neonsfeer"
         ]
         
         self.sheet_name = "Competitor Ads Data"
@@ -117,23 +117,6 @@ class EnhancedCompetitorMonitor:
                 continue
         
         return processed_ads
-    
-    def download_ad_creative(self, snapshot_url, ad_id):
-        """Download ad creative image"""
-        try:
-            if not snapshot_url:
-                return None
-                
-            response = requests.get(snapshot_url)
-            if response.status_code == 200:
-                # Convert to base64 for storage
-                image_data = base64.b64encode(response.content).decode()
-                return f"data:image/png;base64,{image_data[:100]}..."  # Truncated for display
-            
-        except Exception as e:
-            print(f"❌ Error downloading creative for {ad_id}: {e}")
-            
-        return None
     
     def save_to_google_sheets(self, all_ads_data):
         """Save enhanced data to Google Sheets"""
