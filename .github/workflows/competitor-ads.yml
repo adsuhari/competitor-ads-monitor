@@ -18,10 +18,9 @@ jobs:
           
       - name: Install dependencies
         run: |
-          pip install requests gspread oauth2client
+          pip install requests beautifulsoup4 gspread oauth2client
           
       - name: Run enhanced competitor monitor
         env:
           GOOGLE_SHEETS_CREDS: ${{ secrets.GOOGLE_SHEETS_CREDS }}
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: python free_competitor_monitor.py
